@@ -5,8 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NexusAI</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap" rel="stylesheet" />
+  
 </head>
 <body>
 
@@ -33,6 +32,7 @@
   <div class="sidebar-section">
     <div class="section-label">Feature</div>
     <div class="feature-grid" id="featureGrid">
+      <button class="feature-btn" data-feature="rag"><span class="feat-icon">📚</span><span class="feat-label">RAG Docs</span></button>
       <button class="feature-btn active" data-feature="chat"><span class="feat-icon">💬</span><span class="feat-label">Chat</span></button>
       <button class="feature-btn" data-feature="image_gen"><span class="feat-icon">🎨</span><span class="feat-label">Image Gen</span></button>
       <button class="feature-btn" data-feature="vision"><span class="feat-icon">👁</span><span class="feat-label">Vision</span></button>
@@ -47,6 +47,14 @@
   <div class="sidebar-section">
     <div class="section-label">Model</div>
     <div class="model-list" id="modelList"></div>
+  </div>
+
+  <div class="sidebar-section" id="ragSection" style="display:none">
+    <div class="section-label">📚 Loaded Documents</div>
+    <div id="ragDocsPanel" class="rag-docs-panel">
+      <div class="rag-empty">No documents loaded yet.<br/>Upload PDF, TXT, CSV, JSON…</div>
+    </div>
+    <button class="rag-clear-btn" id="ragClearBtn">🗑 Clear All Docs</button>
   </div>
 
   <div class="sidebar-section flex-fill">
@@ -102,7 +110,7 @@
       <button class="attach-btn" id="attachBtn" title="Attach file">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05L12.25 20.24a6 6 0 01-8.49-8.49L15.5 0l.01.01A4.5 4.5 0 0121.8 6.5l-9.72 9.72a3 3 0 01-4.24-4.24l8.49-8.49"/></svg>
       </button>
-      <input type="file" id="fileInput" style="display:none" multiple accept="image/*,audio/*,.txt,.pdf" />
+      <input type="file" id="fileInput" style="display:none" multiple accept="image/*,audio/*,.txt,.pdf,.csv,.json,.md,.xml,.docx,.xlsx" />
       <textarea id="msgInput" class="msg-input" placeholder="Message NexusAI…" rows="1"></textarea>
       <button class="send-btn" id="sendBtn" disabled>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2L15 22 11 13 2 9 22 2z"/></svg>

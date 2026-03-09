@@ -12,10 +12,10 @@ const API = 'https://api.openai.com/v1';
 
 // All models grouped
 const MODEL_CATALOG = [
-  { id:'gpt-5-mini',              label:'GPT-5 Mini',            tag:'Latest',    features:['chat','vision','translate','summarize','code'] },
-  { id:'gpt-5-nano',              label:'GPT-5 Nano',            tag:'Fast',      features:['chat','vision','translate','summarize','code'] },
-  { id:'gpt-4.1-nano',            label:'GPT-4.1 Nano',          tag:'Efficient', features:['chat','vision','translate','summarize','code'] },
-  { id:'gpt-4o-mini',             label:'GPT-4o Mini',           tag:'Balanced',  features:['chat','vision','translate','summarize','code'] },
+  { id:'gpt-5-mini',              label:'GPT-5 Mini',            tag:'Latest',    features:['chat','vision','translate','summarize','code','rag'] },
+  { id:'gpt-5-nano',              label:'GPT-5 Nano',            tag:'Fast',      features:['chat','vision','translate','summarize','code','rag'] },
+  { id:'gpt-4.1-nano',            label:'GPT-4.1 Nano',          tag:'Efficient', features:['chat','vision','translate','summarize','code','rag'] },
+  { id:'gpt-4o-mini',             label:'GPT-4o Mini',           tag:'Balanced',  features:['chat','vision','translate','summarize','code','rag'] },
   { id:'o4-mini',                 label:'O4 Mini',               tag:'Reasoning', features:['chat','translate','summarize','code'] },
   { id:'gpt-realtime-mini',       label:'GPT Realtime Mini',     tag:'Realtime',  features:['chat'] },
   { id:'gpt-audio-mini',          label:'GPT Audio Mini',        tag:'Audio',     features:['chat'] },
@@ -32,6 +32,7 @@ const MODEL_CATALOG = [
 
 // Feature definitions
 const FEATURES = {
+  rag:       { icon:'📚', label:'RAG Docs',     color:'#4a7fd4', inputHint:'Ask a question about your uploaded documents…' },
   chat:      { icon:'💬', label:'Chat',         color:'#7c6af7', inputHint:'Ask me anything…' },
   image_gen: { icon:'🎨', label:'Image Gen',    color:'#ffaa00', inputHint:'Describe the image you want…' },
   vision:    { icon:'👁', label:'Vision',       color:'#3ecfcf', inputHint:'Ask about the attached image…' },
@@ -44,7 +45,7 @@ const FEATURES = {
 
 // Default model per feature
 const DEFAULT_MODELS = {
-  chat:'gpt-5-mini', image_gen:'dall-e-3', vision:'gpt-5-mini',
+  rag:'gpt-5-mini', chat:'gpt-5-mini', image_gen:'dall-e-3', vision:'gpt-5-mini',
   tts:'tts-1', stt:'whisper-1', translate:'gpt-5-mini',
   summarize:'gpt-5-mini', code:'gpt-5-mini',
 };
@@ -74,6 +75,8 @@ const state = {
   imgStyle: 'vivid',
   translateTo: 'Arabic',
   codeLanguage: 'Python',
+  ragDocs: [],       // { name, type, content, chunks[] }
+  ragActive: false,  // is RAG mode on with loaded docs
 };
 
 // ══════════════════════════════════════════════
@@ -120,6 +123,10 @@ function init() {
   renderChatHistory();
   attachEvents();
   updateTopbar();
+  // Show RAG panel if that feature was active
+  const ragSection = $('ragSection');
+  if (ragSection && state.activeFeature === 'rag') ragSection.style.display = 'block';
+  renderRagDocsList();
   if (state.activeChatId) loadChat(state.activeChatId);
 }
 
@@ -223,6 +230,9 @@ function renderFeatureControls() {
   if (feat === 'vision') {
     html = `<span class="fc-badge">👁 Attach an image, then ask your question</span>`;
   }
+  if (feat === 'rag') {
+    html = `<span class="fc-badge">📚 ${state.ragDocs.length} doc(s) loaded · Ask questions about your files</span>`;
+  }
 
   dom.featureControls.innerHTML = html;
 
@@ -247,8 +257,8 @@ function renderFeatureControls() {
   dom.msgInput.placeholder = hint;
 
   // Show/hide attach button
-  dom.attachBtn.style.display = (feat === 'vision' || feat === 'stt') ? 'flex' : 'none';
-  if (!['vision','stt'].includes(feat)) { state.pendingFiles = []; dom.fileStrip.innerHTML = ''; }
+  dom.attachBtn.style.display = (feat === 'vision' || feat === 'stt' || feat === 'rag') ? 'flex' : 'none';
+  if (!['vision','stt','rag'].includes(feat)) { state.pendingFiles = []; dom.fileStrip.innerHTML = ''; }
 }
 
 // ══════════════════════════════════════════════
@@ -455,6 +465,11 @@ function esc(s) {
 // ══════════════════════════════════════════════
 function addFiles(files) {
   Array.from(files).forEach(f => {
+    // Skip if file already added
+    if (state.pendingFiles.some(existing => existing.name === f.name && existing.size === f.size)) {
+      toast(`"${f.name}" already added`, 'err');
+      return;
+    }
     state.pendingFiles.push(f);
     const item = document.createElement('div');
     item.className = 'fp-item'; item.dataset.name = f.name;
@@ -477,6 +492,8 @@ function addFiles(files) {
 window.removeFile = name => {
   state.pendingFiles = state.pendingFiles.filter(f => f.name !== name);
   dom.fileStrip.querySelectorAll('.fp-item').forEach(el => { if(el.dataset.name===name) el.remove(); });
+  // Reset input so same file can be re-selected after removal
+  dom.fileInput.value = '';
   updateSendBtn();
 };
 
@@ -519,6 +536,7 @@ async function send() {
 
   try {
     switch(feat) {
+      case 'rag':       await doRAG(prompt, files); break;
       case 'chat':      await doChat(prompt, files); break;
       case 'image_gen': await doImageGen(prompt); break;
       case 'vision':    await doVision(prompt, files); break;
@@ -603,6 +621,268 @@ function buildConversation(newPrompt) {
 // ══════════════════════════════════════════════
 // FEATURE HANDLERS
 // ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// RAG — DOCUMENT Q&A
+// ══════════════════════════════════════════════
+
+/**
+ * Parse file to plain text depending on type
+ */
+async function parseFileToText(file) {
+  const name = file.name.toLowerCase();
+  const type = file.type;
+
+  // Plain text / markdown / code files
+  if (type.startsWith('text/') || name.endsWith('.txt') || name.endsWith('.md') ||
+      name.endsWith('.csv') || name.endsWith('.json') || name.endsWith('.xml') ||
+      name.endsWith('.html') || name.endsWith('.js') || name.endsWith('.py')) {
+    return await file.text();
+  }
+
+  // PDF — extract text via PDF.js (loaded from CDN)
+  if (type === 'application/pdf' || name.endsWith('.pdf')) {
+    return await extractPdfText(file);
+  }
+
+  // CSV fallback
+  if (name.endsWith('.csv')) {
+    return await file.text();
+  }
+
+  // Try reading as text for anything else
+  try { return await file.text(); } catch { return ''; }
+}
+
+/**
+ * Extract text from PDF using PDF.js loaded dynamically
+ */
+async function extractPdfText(file) {
+  // Dynamically load PDF.js if not already loaded
+  if (!window.pdfjsLib) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join(' ');
+    fullText += `
+[Page ${i}]
+${pageText}
+`;
+  }
+
+  return fullText.trim();
+}
+
+/**
+ * Split text into overlapping chunks for context window management
+ */
+function chunkText(text, chunkSize = 1200, overlap = 200) {
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length);
+    chunks.push(text.slice(start, end));
+    if (end === text.length) break;
+    start += chunkSize - overlap;
+  }
+  return chunks;
+}
+
+/**
+ * Simple keyword-based retrieval (no embeddings API needed)
+ * Scores chunks by how many query words they contain
+ */
+function retrieveRelevantChunks(query, chunks, topK = 5) {
+  const queryWords = query.toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 2);
+
+  const scored = chunks.map((chunk, idx) => {
+    const lower = chunk.toLowerCase();
+    let score = 0;
+    queryWords.forEach(word => {
+      // Count occurrences
+      const matches = (lower.match(new RegExp(word, 'g')) || []).length;
+      score += matches;
+      // Bonus for exact phrase proximity
+      if (lower.includes(query.toLowerCase().slice(0, 30))) score += 5;
+    });
+    return { chunk, score, idx };
+  });
+
+  return scored
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .sort((a, b) => a.idx - b.idx) // restore original order
+    .map(s => s.chunk);
+}
+
+/**
+ * Upload documents into RAG state
+ */
+async function ingestDocuments(files) {
+  if (!files.length) return;
+
+  const panel = $('ragDocsPanel');
+  if (panel) panel.innerHTML = '<div class="rag-loading">⏳ Processing documents…</div>';
+
+  for (const file of files) {
+    try {
+      const text = await parseFileToText(file);
+      if (!text || text.trim().length < 10) {
+        toast(`⚠️ Could not extract text from ${file.name}`, 'err');
+        continue;
+      }
+      const chunks = chunkText(text);
+      // Remove existing doc with same name
+      state.ragDocs = state.ragDocs.filter(d => d.name !== file.name);
+      state.ragDocs.push({
+        name: file.name,
+        type: file.type || 'text/plain',
+        size: file.size,
+        charCount: text.length,
+        chunks,
+      });
+      toast(`📚 Loaded: ${file.name} (${chunks.length} chunks)`, 'ok');
+    } catch (e) {
+      toast(`Failed to parse ${file.name}: ${e.message}`, 'err');
+    }
+  }
+
+  state.ragActive = state.ragDocs.length > 0;
+  renderRagDocsList();
+}
+
+/**
+ * Render loaded docs in sidebar RAG panel
+ */
+function renderRagDocsList() {
+  const panel = $('ragDocsPanel');
+  if (!panel) return;
+
+  if (!state.ragDocs.length) {
+    panel.innerHTML = '<div class="rag-empty">No documents loaded yet.<br/>Upload PDF, TXT, CSV, JSON…</div>';
+    return;
+  }
+
+  panel.innerHTML = state.ragDocs.map(doc => `
+    <div class="rag-doc-item">
+      <span class="rag-doc-icon">${ragDocIcon(doc.name)}</span>
+      <div class="rag-doc-info">
+        <div class="rag-doc-name">${esc(doc.name)}</div>
+        <div class="rag-doc-meta">${doc.chunks.length} chunks · ${(doc.charCount/1000).toFixed(1)}k chars</div>
+      </div>
+      <button class="rag-doc-del" onclick="removeRagDoc('${esc(doc.name)}')" title="Remove">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function ragDocIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const icons = { pdf:'📕', txt:'📄', csv:'📊', json:'📋', md:'📝', html:'🌐', py:'🐍', js:'⚡' };
+  return icons[ext] || '📎';
+}
+
+window.removeRagDoc = (name) => {
+  state.ragDocs = state.ragDocs.filter(d => d.name !== name);
+  state.ragActive = state.ragDocs.length > 0;
+  renderRagDocsList();
+  toast(`Removed: ${name}`, 'ok');
+};
+
+/**
+ * Main RAG Q&A handler
+ */
+async function doRAG(prompt, files) {
+  // If new files attached, ingest them first
+  if (files.length) {
+    await ingestDocuments(files);
+  }
+
+  if (!prompt) {
+    hideLoading();
+    renderMsg('ai', '📚 Documents loaded! Now ask me anything about them.');
+    return;
+  }
+
+  if (!state.ragDocs.length) {
+    hideLoading();
+    renderMsg('ai', '⚠️ No documents loaded yet. Please attach a PDF, TXT, CSV, or other text file first.');
+    return;
+  }
+
+  // Retrieve relevant chunks from ALL docs
+  const model = state.selectedModels.rag;
+  let allChunks = [];
+  state.ragDocs.forEach(doc => {
+    const relevant = retrieveRelevantChunks(prompt, doc.chunks, 3);
+    relevant.forEach(chunk => {
+      allChunks.push(`[From: ${doc.name}]
+${chunk}`);
+    });
+  });
+
+  // If no relevant chunks found, still send top chunks
+  if (allChunks.length === 0) {
+    state.ragDocs.forEach(doc => {
+      allChunks.push(`[From: ${doc.name}]
+${doc.chunks[0] || ''}`);
+    });
+  }
+
+  // Build context (cap at ~6000 chars to stay within token limits)
+let context = allChunks.join('\n\n---\n\n');
+
+if (context.length > 6000) {
+  context = context.slice(0, 6000) + '\n\n[Context truncated…]';
+}
+
+const systemPrompt = `You are a precise document Q&A assistant. 
+You ONLY answer questions based on the provided document context below.
+
+Rules:
+- If the answer EXISTS in the context, answer clearly and cite which document it came from.
+- If the answer does NOT exist in the context, say exactly: "❌ I couldn't find information about this in the uploaded documents."
+- Never make up information outside the context.
+- Be concise and accurate.
+- If relevant, quote the exact text from the document.
+
+=== DOCUMENT CONTEXT ===
+${context}`;
+ 
+  const data = await apiPost('/chat/completions', {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: prompt },
+    ],
+    max_completion_tokens: 1024,
+  });
+
+  hideLoading();
+  const reply = data.choices?.[0]?.message?.content || 'No answer generated.';
+  renderMsg('ai', reply);
+  addToHistory('assistant', reply);
+}
 
 // 1. CHAT
 async function doChat(prompt, files) {
@@ -879,9 +1159,27 @@ function attachEvents() {
       renderModelList();
       renderFeatureControls();
       updateTopbar();
+      // Show/hide RAG docs panel
+      const ragSection = $('ragSection');
+      if (ragSection) ragSection.style.display = state.activeFeature === 'rag' ? 'block' : 'none';
       toast(`${FEATURES[state.activeFeature].icon} ${FEATURES[state.activeFeature].label} mode`,'ok');
     });
   });
+
+  // RAG clear button
+  const ragClearBtn = $('ragClearBtn');
+  if (ragClearBtn) {
+    ragClearBtn.addEventListener('click', () => {
+      if (state.ragDocs.length === 0) { toast('No documents to clear.', 'err'); return; }
+      if (confirm('Clear all loaded documents?')) {
+        state.ragDocs = [];
+        state.ragActive = false;
+        renderRagDocsList();
+        renderFeatureControls();
+        toast('All documents cleared.', 'ok');
+      }
+    });
+  }
 
   // Send
   dom.sendBtn.addEventListener('click', send);

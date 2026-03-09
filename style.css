@@ -442,3 +442,149 @@ body::after {
 }
 
 * { scrollbar-width: thin; scrollbar-color: var(--b2) transparent; }
+
+/* ══════════════════════════════
+   RAG — DOCUMENT Q&A STYLES
+══════════════════════════════ */
+
+#ragSection {
+  border-bottom: 1px solid var(--b1);
+  padding: 11px 14px;
+  flex-shrink: 0;
+}
+
+.rag-docs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.rag-docs-panel::-webkit-scrollbar { width: 3px; }
+.rag-docs-panel::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 3px; }
+
+.rag-empty {
+  font-size: 11.5px;
+  font-family: var(--code);
+  color: var(--t3);
+  text-align: center;
+  padding: 14px 8px;
+  line-height: 1.7;
+}
+
+.rag-loading {
+  font-size: 11.5px;
+  font-family: var(--code);
+  color: var(--p2);
+  text-align: center;
+  padding: 10px;
+  animation: pulse-text 1.2s ease-in-out infinite;
+}
+@keyframes pulse-text { 0%,100%{opacity:1}50%{opacity:.4} }
+
+.rag-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--bg3);
+  border: 1px solid var(--b2);
+  border-radius: var(--rsm);
+  transition: background .15s;
+  position: relative;
+  overflow: hidden;
+}
+.rag-doc-item::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2.5px;
+  background: linear-gradient(to bottom, var(--p), var(--p2));
+  border-radius: 2px;
+}
+.rag-doc-item:hover { background: var(--bg4); }
+
+.rag-doc-icon { font-size: 14px; flex-shrink: 0; }
+
+.rag-doc-info { flex: 1; min-width: 0; }
+.rag-doc-name {
+  font-size: 11.5px;
+  font-family: var(--code);
+  color: var(--t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rag-doc-meta {
+  font-size: 9.5px;
+  font-family: var(--code);
+  color: var(--t3);
+  letter-spacing: 0.04em;
+  margin-top: 1px;
+}
+
+.rag-doc-del {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--t3);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color .15s;
+  flex-shrink: 0;
+}
+.rag-doc-item:hover .rag-doc-del { opacity: 1; }
+.rag-doc-del:hover { color: var(--err); }
+
+.rag-clear-btn {
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 1px dashed var(--b3);
+  border-radius: var(--rsm);
+  color: var(--t3);
+  font-family: var(--code);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .18s;
+  letter-spacing: 0.03em;
+}
+.rag-clear-btn:hover {
+  border-color: var(--err);
+  color: var(--err);
+  background: rgba(204,102,102,0.05);
+}
+
+/* Active pill for RAG */
+.active-pill.feat-rag {
+  background: rgba(74,127,212,0.1);
+  border-color: rgba(74,127,212,0.35);
+  color: var(--p2);
+}
+
+/* RAG source citation in message */
+.rag-source {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 9px;
+  background: rgba(74,127,212,0.08);
+  border: 1px solid rgba(74,127,212,0.25);
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-family: var(--code);
+  color: var(--p2);
+  letter-spacing: 0.03em;
+}
+
+/* RAG not-found message styling */
+.msg-bubble .rag-not-found {
+  color: var(--t2);
+  font-style: italic;
+  border-left: 2px solid var(--b3);
+  padding-left: 10px;
+  margin-top: 6px;
+}
